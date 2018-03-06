@@ -20,7 +20,7 @@ import com.eagleeye.metrics.StockMetrics;
 public class TestStreamDriver {
 
   public static void main(String[] args) throws IOException, ParseException {
-    String stock = "AFH";
+    String stock = "BIIB";
 
     InputStream is = TestStreamDriver.class.getResourceAsStream(stock + ".csv");
     if (null == is) {
@@ -31,8 +31,10 @@ public class TestStreamDriver {
     boolean first = true;
     String line;
     StockMetricsHistory stream = new StockMetricsHistory(StreamType.DAILY, 1000000);
-    DailyHistoryChecker checker = new DailyHistoryChecker(stream);
-    int breakOutCount = 0;
+    LongDailyHistoryChecker longChecker = new LongDailyHistoryChecker(stream);
+    ShortDailyHistoryChecker shortChecker = new ShortDailyHistoryChecker(stream);
+    int longBreakOutCount = 0;
+    int shortBreakOutCount = 0;
     List<BreakOutEvent> events = new ArrayList<>();;
     while ((line = reader.readLine()) != null) {
       if (first) {
@@ -43,31 +45,57 @@ public class TestStreamDriver {
       StockMetrics metrics = generateMetrics(fields);
       Assert.assertNotNull(metrics);
       stream.onMetrics(metrics);
-      BreakOutEvent event = checker.breakOutCheck();
+      BreakOutEvent event = null;
+      event = longChecker.breakOutCheck();
       if (event != null) {
         events.add(event);
-        breakOutCount++;
+        longBreakOutCount++;
+      }
+      event = null;
+      event = shortChecker.breakOutCheck();
+      if (event != null) {
+        events.add(event);
+        shortBreakOutCount++;
       }
     }
 
     int gainCount = 0;
     int lossCount = 0;
     double totalNetLoss = 0;
+    double totalNetGain = 0;
     double totalGainRatio = 0;
     int minDays = -1;
     int maxDays = -1;
     int totalDays = 0;
     for (BreakOutEvent event : events) {
+      double acVolumeRatio = Math.round((double) event.getCPoint().getVolume() / (double) event.getAPoint().getVolume() * 100.) / 100.;
+      if (event.isLong()) {
+        System.out.print("Long ");
+      } else {
+        System.out.print("Short ");
+      }
       System.out
-          .println("Breakout date: " + dateFormat.format(new Date(event.getBPoint().getStartTimestamp())) + ", A-B ratio: " + event
+          .println("breakout date: " + dateFormat.format(new Date(event.getBPoint().getStartTimestamp())) + ", A-B ratio: " + event
               .getABPriceDifferenceRatio() + ", A-B days: " + event.getABDurationInDays() + ", C-D ratio: " + event
-              .getCDPriceDifferenceRatio() + ", C-D days: " + event.getCDDurationInDays());
+              .getCDPriceDifferenceRatio() + ", C-D days: " + event.getCDDurationInDays() + ", ratio of C/A volume: " + acVolumeRatio);
+      System.out
+          .println("A point date: " + dateFormat.format(new Date(event.getAPoint().getStartTimestamp())) + ", volume: " + event.getAPoint()
+              .getVolume() + ", price: " + event.getAPoint().getAdjustedClosePrice() + ", B point date: " + dateFormat.format(new Date(
+              event.getBPoint().getStartTimestamp())) + ", volume: " + event.getBPoint().getVolume() + ", price: " + event.getBPoint()
+              .getAdjustedClosePrice() + ", C point date: " + dateFormat.format(new Date(event.getCPoint().getStartTimestamp())) + ", volume: " + event
+              .getCPoint().getVolume() + ", price: " + event.getCPoint().getAdjustedClosePrice() + ", D point date: " + dateFormat
+              .format(new Date(event.getDPoint().getStartTimestamp())) + ", volume: " + event.getDPoint().getVolume() + ", price: " + event
+              .getDPoint().getAdjustedClosePrice());
+      System.out.println("Long short ratio: " + event.getLongShortRatio());
+      System.out.println();
+
       totalGainRatio += event.getCDPriceDifferenceRatio();
       if (event.getCDPriceDifferenceRatio() < 0) {
         lossCount++;
         totalNetLoss += event.getCDPriceDifferenceRatio();
       } else {
         gainCount++;
+        totalNetGain += event.getCDPriceDifferenceRatio();
       }
       if (minDays == -1) {
         minDays = event.getCDDurationInDays();
@@ -79,10 +107,16 @@ public class TestStreamDriver {
     }
     totalGainRatio = Math.round(totalGainRatio * 100.) / 100.;
     totalNetLoss = Math.round(totalNetLoss * 100.) / 100.;
+    totalNetGain = Math.round(totalNetGain * 100.) / 100.;
+    System.out.println();
     System.out
-        .println("Total breakout times: " + breakOutCount + ", total gain: " + totalGainRatio + "%, number of gain: " + gainCount + ", number of loss: " + lossCount + ", total net loss: " + totalNetLoss);
-    System.out
-        .println("Average trade days: " + (totalDays / events.size()) + ", min trade days " + minDays + ", max trade days " + maxDays);
+        .println("Total breakout times: " + (longBreakOutCount + shortBreakOutCount) + ", number of gain: " + gainCount + ", number of loss: " + lossCount + ", total net loss: " + totalNetLoss + "%" + ", total net gain: " + totalNetGain + "%, total earning ratio: " + totalGainRatio + "%");
+    if (!events.isEmpty()) {
+      System.out
+          .println("Average trade days: " + (totalDays / events.size()) + ", min trade days " + minDays + ", max trade days " + maxDays);
+    }
+    System.out.println("Total long breakout count: " + longBreakOutCount + ", total short breakout count: " + shortBreakOutCount);
+
   }
 
   private static StockMetrics generateMetrics(String[] fields) throws ParseException {
